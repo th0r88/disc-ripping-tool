@@ -109,7 +109,7 @@ sudo chmod 0440 /etc/sudoers.d/disc-eject
 
 **Security Note:** These rules only allow specific disc-related commands. The script itself runs as your normal user with your cargo binaries accessible.
 
-### Step 6: Install MakeMKV (Optional but Recommended)
+### Step 6: Install MakeMKV
 
 For lossless DVD backups with no quality loss, compile from source.
 
