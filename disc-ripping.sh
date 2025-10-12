@@ -34,7 +34,7 @@ COMPLETED_LOG="$TEMP_DIR/transcode_completed.log"
 OUTPUT_DIR="$WORK_DIR/output"
 NAS_MOVIES="/mnt/Plex/Movies"
 LOG_FILE="$WORK_DIR/disc-rip.log"
-DISC_DEVICE="/dev/sr0"
+DISC_DEVICE=""  # Will be auto-detected or selected by user
 
 # Preset files (relative to script location)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -120,6 +120,76 @@ log_debug() {
     local msg="[$(date +'%Y-%m-%d %H:%M:%S')] [DEBUG] $1"
     echo -e "${BLUE}[DEBUG]${NC} $1"
     echo "$msg" >> "$LOG_FILE"
+}
+
+# Detect and select optical drive
+detect_optical_drive() {
+    log_info "Detecting optical drives..."
+
+    # Find all optical drives
+    local drives=()
+    for device in /dev/sr[0-9] /dev/sr[0-9][0-9]; do
+        if [ -b "$device" ]; then
+            drives+=("$device")
+        fi
+    done
+
+    # No drives found
+    if [ ${#drives[@]} -eq 0 ]; then
+        log_error "No optical drives detected"
+        echo ""
+        echo "Please ensure:"
+        echo "  1. An optical drive is connected"
+        echo "  2. You have permissions to access the drive"
+        echo "  3. The drive appears in 'lsblk' or 'ls -l /dev/sr*'"
+        echo ""
+        return 1
+    fi
+
+    # Single drive - auto-select
+    if [ ${#drives[@]} -eq 1 ]; then
+        DISC_DEVICE="${drives[0]}"
+        log_info "Auto-selected drive: $DISC_DEVICE"
+
+        # Get drive info if possible
+        local drive_info=$(lsblk -ndo MODEL "$DISC_DEVICE" 2>/dev/null || echo "Unknown")
+        log_info "Drive model: $drive_info"
+        return 0
+    fi
+
+    # Multiple drives - user selection
+    echo ""
+    echo "Multiple optical drives detected:"
+    echo ""
+
+    local i=1
+    for drive in "${drives[@]}"; do
+        local model=$(lsblk -ndo MODEL "$drive" 2>/dev/null || echo "Unknown Model")
+        local disc_status="No disc"
+
+        # Try to detect if disc is present
+        if timeout 2 dd if="$drive" of=/dev/null bs=1 count=1 2>/dev/null; then
+            disc_status="${GREEN}Disc present${NC}"
+        fi
+
+        echo -e "  ${YELLOW}$i)${NC} $drive - $model [$disc_status]"
+        ((i++))
+    done
+
+    echo ""
+    echo -n "Select drive (1-${#drives[@]}): "
+    read -r selection
+
+    # Validate selection
+    if [[ ! "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt ${#drives[@]} ]; then
+        log_error "Invalid selection"
+        return 1
+    fi
+
+    DISC_DEVICE="${drives[$((selection-1))]}"
+    log_info "Selected drive: $DISC_DEVICE"
+
+    return 0
 }
 
 # Error trap
@@ -1481,11 +1551,11 @@ main() {
             fi
         fi
 
-        # Check if disc device is present and readable
-        if [ ! -b "$DISC_DEVICE" ]; then
-            log_error "Disc device not found: $DISC_DEVICE"
+        # Detect and select optical drive
+        if ! detect_optical_drive; then
             exit 1
         fi
+        echo
 
         # Unmount if auto-mounted
         if mount | grep -q "$DISC_DEVICE"; then
@@ -1501,7 +1571,13 @@ main() {
         if ! echo "$scan_test" | grep -q "scan: DVD has"; then
             log_error "No readable disc found in drive. Please insert a disc."
             log_debug "Scan output: $scan_test"
-            exit 1
+            echo
+            log_info "Opening drive door..."
+            eject_disc
+            echo
+            log_info "Returning to main menu..."
+            sleep 2
+            exec "$0" "$@"
         fi
 
         # Get movie title from user

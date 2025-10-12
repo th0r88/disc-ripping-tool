@@ -12,6 +12,8 @@ A robust bash script for automated DVD/Blu-ray backup and transcoding with disas
 - **TMDb Integration**: Automatic movie metadata lookup with Plex-compatible naming
 - **NAS Support**: Automatic transfer to Plex media directory with verification
 
+![Disc Ripping Automation Tool](images/disc_ripping_automation_tool.png)
+
 ## System Requirements
 
 - **OS**: Debian 13 (Trixie) or later (headless supported)
@@ -784,3 +786,5 @@ Movie metadata provided by **The Movie Database (TMDb)** API.
 - mkvtoolnix - https://mkvtoolnix.download/
 - subtile-ocr - https://github.com/FedericoCarboni/subtile-ocr
 - The Movie Database (TMDb) - https://www.themoviedb.org/
+
+_Script was created with help of Claude Code_

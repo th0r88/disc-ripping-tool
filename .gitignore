@@ -19,3 +19,8 @@ temp/
 # API keys (if stored in separate file)
 .env
 *.key
+
+# Test files
+test.sh
+test.md
+test.txt
