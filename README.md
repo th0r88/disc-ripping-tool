@@ -636,7 +636,7 @@ The script automatically handles common failure scenarios:
 
 - **`transcode_queue.txt`** - List of pending transcodes (removed line-by-line as processed unless `--keep-temp` is used)
   - Format: `backup_path|movie_title|year|imdb_id|preset_identifier`
-  - Example: `/home/jan/disc-ripping/temp/backups/imdb-tt0133093_raw.mkv|The Matrix|1999|tt0133093|custom_x264_mkv2`
+  - Example: `$HOME/disc-ripping/temp/backups/imdb-tt0133093_raw.mkv|The Matrix|1999|tt0133093|custom_x264_mkv2`
 
 - **`transcode_completed.log`** - Permanent record of all processed items (success/failure)
 
