@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Disc to Plex Automation Script (MakeMKV Version)
+# Disc Ripping Automation Tool
 # Usage: ./disc-ripping.sh [--keep-temp]
 
 set -euo pipefail  # Exit on error, undefined variables, and pipe failures
@@ -24,15 +24,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Configuration
-TMDB_API_KEY="571c82dea1282e1fdef9dc5702b64ffe"  # Replace with your TMDb API key
-WORK_DIR="/home/jan/disc-ripping"
+TMDB_API_KEY="API_KEY_GOES_HERE"  # Replace with your TMDb API key
+WORK_DIR="$HOME/disc-ripping"
 TEMP_DIR="$WORK_DIR/temp"
 BACKUP_DIR="$TEMP_DIR/backups"
 QUEUE_FILE="$TEMP_DIR/transcode_queue.txt"
 STATE_FILE="$TEMP_DIR/current_operation.state"
 COMPLETED_LOG="$TEMP_DIR/transcode_completed.log"
 OUTPUT_DIR="$WORK_DIR/output"
-NAS_MOVIES="/mnt/Plex/temp"
+NAS_MOVIES="/mnt/Plex/Movies"
 LOG_FILE="$WORK_DIR/disc-rip.log"
 DISC_DEVICE="/dev/sr0"
 

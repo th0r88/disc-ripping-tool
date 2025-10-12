@@ -249,13 +249,13 @@ Update these variables (lines 26-37):
 
 ```bash
 # TMDb API Key (required - get from https://www.themoviedb.org/settings/api)
-TMDB_API_KEY="571c82dea1282e1fdef9dc5702b64ffe"  # Replace with your API key
+TMDB_API_KEY="API_KEY_GOES_HERE"  # Replace with your API key
 
 # Working directory (where backups are stored)
-WORK_DIR="/home/jan/disc-ripping"
+WORK_DIR="$HOME/disc-ripping"
 
 # NAS destination for final files
-NAS_MOVIES="/mnt/Plex/temp"
+NAS_MOVIES="/mnt/Plex/Movies"
 
 # Disc device (usually /dev/sr0)
 DISC_DEVICE="/dev/sr0"
@@ -784,7 +784,3 @@ Movie metadata provided by **The Movie Database (TMDb)** API.
 - mkvtoolnix - https://mkvtoolnix.download/
 - subtile-ocr - https://github.com/FedericoCarboni/subtile-ocr
 - The Movie Database (TMDb) - https://www.themoviedb.org/
-
-## Support
-
-For issues, questions, or contributions, please see the project documentation in `CLAUDE.md`.
