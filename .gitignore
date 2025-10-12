@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Claude Code
+.claude/
+Claude.md
+
+# Logs
+*.log
+
+# Working directories (disc ripping output)
+backups/
+transcode-queue/
+output/
+temp/
+
+# API keys (if stored in separate file)
+.env
+*.key
