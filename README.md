@@ -6,11 +6,14 @@ A robust bash script for automated DVD/Blu-ray backup and transcoding with disas
 
 - **Two-Phase Workflow**: Quickly backup multiple discs, then batch-transcode overnight
 - **MakeMKV Integration**: Lossless backup for DVD and Blu-ray discs
+- **Retry Mechanisms**: Automatic retry logic for failed scans (3 attempts) and backups (2 attempts) with user recovery options
 - **Disaster Recovery**: Resume interrupted operations, recover orphaned backups, cleanup partial files
 - **Queue Management**: Track pending transcodes, log completed items
 - **Subtitle Processing**: Automatic extraction and OCR conversion for VobSub (DVD), PGS (Blu-ray), SRT, and ASS/SSA formats with multilingual support
 - **TMDb Integration**: Automatic movie metadata lookup with Plex-compatible naming
 - **NAS Support**: Automatic transfer to Plex media directory with verification
+- **Automatic Disc Ejection**: Ejects disc immediately after backup completes for quick disc swapping
+- **Elapsed Time Tracking**: Shows total time spent at script completion
 
 ![Disc Ripping Automation Tool](images/disc_ripping_automation_tool.png)
 
@@ -363,22 +366,25 @@ The script offers 5 modes:
 # Select correct movie from TMDb search
 # Select encoding preset (DVD/BluRay/4K)
 # Wait 10-15 minutes for lossless MakeMKV backup
-# When complete, choose "1. Backup another disc" (disc auto-ejects)
+# Disc automatically ejects after backup completes
+# When complete, choose "1. Backup another disc"
 # Insert next disc and repeat
 # When done, choose "0. Exit"
+# Script shows total elapsed time
 ```
 
 **Phase 2: Transcode queue (overnight)**
 
 ```bash
 ./disc-ripping.sh
-# Select Mode 2 (disc auto-ejects)
+# Select Mode 2
 # Leave running overnight
 # For each queued item:
 #   1. Extracts subtitles from backup file (before encoding)
 #   2. Encodes video with selected preset
 #   3. Transfers to NAS
 # Processes entire queue automatically
+# Script shows total elapsed time when finished
 ```
 
 **How Subtitle Extraction Works:**
@@ -439,9 +445,42 @@ During encoding, HandBrake displays real-time progress updates:
 
 ## Troubleshooting
 
-### MakeMKV Hangs Forever
+### Disc Scanning Retry Logic
 
-**Symptom**: Script freezes at "Scanning disc with MakeMKV..."
+**New Feature**: The script now automatically retries failed disc scans:
+- **3 scan attempts** with 5-second wait between retries
+- User prompted after each failed attempt
+- Options after all attempts fail:
+  - Try a different disc (keeps queue intact)
+  - Exit and keep queue (resume later)
+  - Exit with cleanup (removes all data)
+
+**Example scenario**:
+```
+[ERROR] MakeMKV could not detect disc (attempt 1 of 3)
+Would you like to retry? (y/n): y
+[Waiting 5 seconds before retry...]
+[ERROR] MakeMKV could not detect disc (attempt 2 of 3)
+Would you like to retry? (y/n): y
+...
+All scan attempts failed. What would you like to do?
+1. Try scanning a different disc
+2. Exit and keep queue
+3. Exit with cleanup
+```
+
+### Backup Retry Logic
+
+**New Feature**: The script now automatically retries failed backups:
+- **2 backup attempts** for each disc
+- User prompted after first failure
+- Same recovery options as scan failures
+
+### MakeMKV Scan Timeout
+
+**Symptom**: Script times out after 180 seconds during disc scan
+
+**Note**: The script now uses a **180-second (3 minute) timeout** for MakeMKV scans, which should handle most slower drives. If your drive is still timing out, it may indicate a hardware or firmware issue.
 
 **Solution 1: Check if you have the correct drive chipset**
 
@@ -593,6 +632,8 @@ sudo dpkg-reconfigure libdvd-pkg
 | DVD | 10-15 min | 4-8 GB | None (lossless) |
 | Blu-ray | 20-40 min | 15-35 GB | None (lossless) |
 | 4K UHD Blu-ray | 40-90 min | 30-100 GB | None (lossless) |
+
+**Note**: MakeMKV scan timeout is set to **180 seconds (3 minutes)** to accommodate slower drives. The script includes automatic retry logic (3 attempts) if scanning fails. See [Troubleshooting](#troubleshooting) for details.
 
 ### Transcode Phase (Mode 2)
 
@@ -767,6 +808,12 @@ A: Yes, MakeMKV supports all DVD and Blu-ray formats including dual-layer.
 
 **Q: What happens if my computer crashes during encoding?**
 A: Use Mode 4 (Recovery mode) to clean up partial files and resume from the queue.
+
+**Q: Does the script track how long operations take?**
+A: Yes! The script now includes elapsed time tracking. When you exit the script (Mode 0) or complete processing (Modes 1-4), it displays the total time spent in a human-readable format (e.g., "Total elapsed time: 2h 45m 30s").
+
+**Q: What happens if a disc scan fails?**
+A: The script automatically retries failed scans 3 times with 5-second waits between attempts. If all attempts fail, you can choose to: try a different disc (keeps your queue), exit and keep the queue (resume later), or exit with cleanup.
 
 ## License
 

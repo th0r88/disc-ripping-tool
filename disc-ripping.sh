@@ -398,9 +398,9 @@ check_disk_space() {
     
     local available_kb=$(df -k "$path" | tail -1 | awk '{print $4}')
     local available_gb=$((available_kb / 1024 / 1024))
-    
-    log_debug "Available space in $path: ${available_gb}GB"
-    
+
+    log_info "Available space in $path: ${available_gb}GB"
+
     if [ "$available_gb" -lt "$required_gb" ]; then
         log_error "Insufficient disk space in $path"
         log_error "Required: ${required_gb}GB, Available: ${available_gb}GB"
@@ -537,7 +537,9 @@ search_tmdb() {
 
 # Scan disc with makemkvcon
 scan_dvd_makemkv() {
-    log_info "Scanning disc with MakeMKV (60 second timeout per attempt)..."
+    # Increased timeout for slower drives/discs (was 60s, now 180s)
+    local scan_timeout=180
+    log_info "Scanning disc with MakeMKV (${scan_timeout} second timeout per attempt)..."
 
     # Try to find disc (makemkvcon uses disc:0, disc:1, disc:2)
     local disc_found=false
@@ -545,33 +547,27 @@ scan_dvd_makemkv() {
     local disc_info=""
 
     for i in {0..2}; do
-        log_debug "Trying MakeMKV disc:$i..."
+        local scan_output=""
+        local exit_code=0
 
-        local scan_output
-        if scan_output=$(timeout 60 makemkvcon -r info disc:$i 2>&1); then
-            local exit_code=$?
+        # Run makemkvcon with timeout, capturing output and exit code
+        # Temporarily disable exit on error for this command
+        set +e
+        scan_output=$(timeout ${scan_timeout} makemkvcon -r info disc:$i 2>&1)
+        exit_code=$?
+        set -e
 
-            if [ $exit_code -eq 0 ] && echo "$scan_output" | grep -q "Title #"; then
-                disc_found=true
-                disc_id="disc:$i"
-                disc_info="$scan_output"
-                log_info "Found disc at disc:$i"
-                break
-            fi
-        else
-            local exit_code=$?
-            if [ $exit_code -eq 124 ]; then
-                log_debug "MakeMKV timed out on disc:$i (60s)"
-            elif [ $exit_code -eq 137 ]; then
-                log_debug "MakeMKV killed on disc:$i"
-            else
-                log_debug "No disc found at disc:$i (exit code: $exit_code)"
-            fi
+        if [ $exit_code -eq 0 ] && echo "$scan_output" | grep -q "Title #"; then
+            disc_found=true
+            disc_id="disc:$i"
+            disc_info="$scan_output"
+            log_info "Found disc at disc:$i"
+            break
         fi
     done
 
     if [ "$disc_found" = false ]; then
-        log_error "MakeMKV could not detect disc (tried disc:0-2, 60s timeout each)"
+        log_error "MakeMKV could not detect disc (tried disc:0-2, ${scan_timeout}s timeout each)"
         return 1
     fi
 
@@ -586,9 +582,8 @@ scan_dvd_makemkv() {
             local hours="${BASH_REMATCH[2]}"
             local minutes="${BASH_REMATCH[3]}"
             local seconds="${BASH_REMATCH[4]}"
+            # Force base-10 interpretation to avoid octal errors
             local total_seconds=$((10#$hours * 3600 + 10#$minutes * 60 + 10#$seconds))
-
-            log_debug "Title $title_id: $(printf "%02d:%02d:%02d" $hours $minutes $seconds)"
 
             if [ "$total_seconds" -gt "$longest_duration" ]; then
                 longest_duration=$total_seconds
@@ -616,9 +611,6 @@ scan_dvd() {
     # Scan disc and get all titles
     local scan_output=$(HandBrakeCLI -i "$DISC_DEVICE" --title 0 --scan 2>&1)
 
-    # Extract title information
-    log_debug "Analyzing disc structure..."
-    
     # Find the longest title (main feature)
     local longest_title=1
     local longest_duration=0
@@ -632,14 +624,13 @@ scan_dvd() {
             local hours="${BASH_REMATCH[1]}"
             local minutes="${BASH_REMATCH[2]}"
             local seconds="${BASH_REMATCH[3]}"
+            # Force base-10 interpretation to avoid octal errors
             local total_seconds=$((10#$hours * 3600 + 10#$minutes * 60 + 10#$seconds))
-            
+
             if [ "$total_seconds" -gt "$longest_duration" ]; then
                 longest_duration=$total_seconds
                 longest_title=$title_num
             fi
-            
-            log_debug "Title $title_num: $(printf "%02d:%02d:%02d" $hours $minutes $seconds)"
         fi
     done <<< "$scan_output"
     
@@ -855,6 +846,13 @@ detect_incomplete_backups() {
         return 0
     fi
 
+    local mkv_files
+    mkv_files=$(find "$BACKUP_DIR" -maxdepth 1 -name "*.mkv" -type f 2>/dev/null || true)
+
+    if [ -z "$mkv_files" ]; then
+        return 1
+    fi
+
     while IFS= read -r file; do
         if [ -f "$file" ]; then
             local size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
@@ -862,7 +860,7 @@ detect_incomplete_backups() {
                 incomplete_files+=("$file")
             fi
         fi
-    done < <(find "$BACKUP_DIR" -maxdepth 1 -name "*.mkv" -type f)
+    done <<< "$mkv_files"
 
     if [ ${#incomplete_files[@]} -gt 0 ]; then
         log_warn "Found ${#incomplete_files[@]} incomplete backup file(s):"
@@ -883,6 +881,14 @@ cleanup_incomplete_backups() {
     fi
 
     local deleted_count=0
+    local mkv_files
+
+    # Find MKV files, handling case where none exist
+    mkv_files=$(find "$BACKUP_DIR" -maxdepth 1 -name "*.mkv" -type f 2>/dev/null || true)
+
+    if [ -z "$mkv_files" ]; then
+        return 0
+    fi
 
     while IFS= read -r file; do
         if [ -f "$file" ]; then
@@ -893,7 +899,7 @@ cleanup_incomplete_backups() {
                 ((deleted_count++))
             fi
         fi
-    done < <(find "$BACKUP_DIR" -maxdepth 1 -name "*.mkv" -type f)
+    done <<< "$mkv_files"
 
     if [ "$deleted_count" -gt 0 ]; then
         log_info "Deleted $deleted_count incomplete backup file(s)"
@@ -907,6 +913,13 @@ detect_orphaned_backups() {
     fi
 
     local orphaned_files=()
+    local mkv_files
+
+    mkv_files=$(find "$BACKUP_DIR" -maxdepth 1 -name "*.mkv" -type f 2>/dev/null || true)
+
+    if [ -z "$mkv_files" ]; then
+        return 1
+    fi
 
     while IFS= read -r file; do
         if [ -f "$file" ]; then
@@ -929,7 +942,7 @@ detect_orphaned_backups() {
                 fi
             fi
         fi
-    done < <(find "$BACKUP_DIR" -maxdepth 1 -name "*.mkv" -type f)
+    done <<< "$mkv_files"
 
     if [ ${#orphaned_files[@]} -gt 0 ]; then
         echo "${orphaned_files[@]}"
@@ -999,8 +1012,15 @@ recover_orphaned_backups() {
 # Cleanup partial encoded files
 cleanup_partial_files() {
     local deleted_count=0
+    local encoded_files
 
     # Clean partial encoded files in TEMP_DIR
+    encoded_files=$(find "$TEMP_DIR" -maxdepth 1 -name "encoded_*.mkv" -type f 2>/dev/null || true)
+
+    if [ -z "$encoded_files" ]; then
+        return 0
+    fi
+
     while IFS= read -r file; do
         if [ -f "$file" ]; then
             local size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
@@ -1010,7 +1030,7 @@ cleanup_partial_files() {
                 ((deleted_count++))
             fi
         fi
-    done < <(find "$TEMP_DIR" -maxdepth 1 -name "encoded_*.mkv" -type f 2>/dev/null)
+    done <<< "$encoded_files"
 
     if [ "$deleted_count" -gt 0 ]; then
         log_info "Deleted $deleted_count partial encoded file(s)"
@@ -1277,7 +1297,7 @@ process_transcode_queue() {
             log_warn "No preset specified in queue, using default: custom_x264_mkv2"
         fi
 
-        ((current_item++))
+        ((current_item++)) || true
 
         log_info "=== Processing $current_item/$total_items ==="
         log_info "Movie: $movie_title ($year)"
@@ -1394,7 +1414,7 @@ process_transcode_queue() {
         # Remove this item from queue (whether success or failure) unless --keep-temp
         if [ "$KEEP_TEMP" = true ]; then
             log_debug "Preserving queue entry (--keep-temp)"
-            ((processed_items++))
+            ((processed_items++)) || true
             # Don't remove from queue, just track that we processed it
         else
             sed -i '1d' "$QUEUE_FILE" 2>/dev/null || sed -i '' '1d' "$QUEUE_FILE" 2>/dev/null
@@ -1479,7 +1499,7 @@ move_to_nas() {
                 
                 if [ "$src_size" -eq "$dst_size" ]; then
                     rm "$file"
-                    ((file_count++))
+                    ((file_count++)) || true
                     log_info "Successfully moved: $filename"
                 else
                     log_error "Size mismatch for $filename - keeping original"
@@ -1495,8 +1515,38 @@ move_to_nas() {
     return 0
 }
 
+# Format seconds into human-readable time
+format_duration() {
+    local total_seconds=$1
+    local hours=$((total_seconds / 3600))
+    local minutes=$(((total_seconds % 3600) / 60))
+    local seconds=$((total_seconds % 60))
+
+    if [ $hours -gt 0 ]; then
+        printf "%dh %dm %ds" $hours $minutes $seconds
+    elif [ $minutes -gt 0 ]; then
+        printf "%dm %ds" $minutes $seconds
+    else
+        printf "%ds" $seconds
+    fi
+}
+
+# Show elapsed time since start
+show_elapsed_time() {
+    local start_time=$1
+    local end_time=$(date +%s)
+    local elapsed=$((end_time - start_time))
+    local duration=$(format_duration $elapsed)
+
+    echo
+    log_info "Total elapsed time: $duration"
+}
+
 # Main workflow
 main() {
+    # Start timer
+    local START_TIME=$(date +%s)
+
     # Initialize
     mkdir -p "$WORK_DIR" "$TEMP_DIR" "$BACKUP_DIR" "$OUTPUT_DIR"
 
@@ -1534,6 +1584,7 @@ main() {
 
     if [ "$mode" -eq 0 ]; then
         log_warn "Exiting"
+        show_elapsed_time "$START_TIME"
         exit 0
     fi
 
@@ -1699,6 +1750,7 @@ main() {
 
         if [ "$has_issues" = false ]; then
             log_info "No recovery issues detected"
+            show_elapsed_time "$START_TIME"
             exit 0
         fi
 
@@ -1773,6 +1825,7 @@ main() {
                 ;;
         esac
 
+        show_elapsed_time "$START_TIME"
         exit 0
     fi
 
@@ -1834,17 +1887,17 @@ main() {
         log_info "=== Subtitle Processing Complete ==="
         log_info "Subtitle files saved to: $OUTPUT_DIR"
         cleanup
+        show_elapsed_time "$START_TIME"
         exit 0
     fi
     
     # Mode 1: Backup Disc to queue
     if [ "$mode" -eq 1 ]; then
         # Clean up any incomplete backups before starting
-        log_info "Checking for incomplete backups..."
-        cleanup_incomplete_backups
+        cleanup_incomplete_backups || true
 
         # Check if MakeMKV is available (required)
-        if [ "$MAKEMKV_AVAILABLE" != true ]; then
+        if [ "${MAKEMKV_AVAILABLE:-false}" != true ]; then
             log_error "MakeMKV is required for backup mode but is not available"
             log_error "Please install MakeMKV (see README.md)"
             cleanup
@@ -1852,21 +1905,305 @@ main() {
         fi
 
         while true; do
-            # Scan disc to find main title using MakeMKV
-            if ! scan_dvd_makemkv; then
-                log_error "MakeMKV scan failed"
-                cleanup
-                exit 1
+            # Scan disc to find main title using MakeMKV (with retry logic)
+            local scan_success=false
+            local scan_attempts=0
+            local max_scan_attempts=3
+
+            while [ "$scan_success" = false ] && [ "$scan_attempts" -lt "$max_scan_attempts" ]; do
+                ((scan_attempts++)) || true
+
+                if [ "$scan_attempts" -gt 1 ]; then
+                    log_info "Scan attempt $scan_attempts of $max_scan_attempts..."
+                fi
+
+                if scan_dvd_makemkv; then
+                    scan_success=true
+                    break
+                else
+                    log_error "MakeMKV scan failed (attempt $scan_attempts/$max_scan_attempts)"
+
+                    if [ "$scan_attempts" -lt "$max_scan_attempts" ]; then
+                        echo
+                        log_info "Possible issues:"
+                        log_info "  - Disc may need cleaning"
+                        log_info "  - Drive may need to stabilize"
+                        log_info "  - Disc may be incompatible or damaged"
+                        echo
+
+                        read -p "Try again? (y/n): " retry_choice
+                        if [ "$retry_choice" != "y" ]; then
+                            break
+                        fi
+
+                        log_info "Waiting 5 seconds before retry..."
+                        sleep 5
+                    fi
+                fi
+            done
+
+            # If scan failed after all retries, offer options
+            if [ "$scan_success" = false ]; then
+                echo
+                log_error "Unable to scan disc after $scan_attempts attempt(s)"
+                echo
+                echo "What would you like to do?"
+                echo "1. Try a different disc"
+                echo "2. Exit and keep current queue"
+                echo "0. Exit and cleanup"
+                echo
+
+                local failure_action=0
+                while true; do
+                    read -p "Enter choice (0-2): " failure_action
+
+                    if [[ "$failure_action" =~ ^[0-2]$ ]]; then
+                        break
+                    else
+                        log_warn "Invalid selection. Please enter 0, 1, or 2."
+                    fi
+                done
+
+                if [ "$failure_action" -eq 0 ]; then
+                    log_info "Exiting with cleanup"
+                    cleanup
+                    exit 1
+                elif [ "$failure_action" -eq 2 ]; then
+                    log_info "Exiting. Backups preserved in: $BACKUP_DIR"
+                    if [ -f "$QUEUE_FILE" ]; then
+                        log_info "Queue file: $QUEUE_FILE"
+                    fi
+                    cleanup
+                    exit 0
+                else
+                    # Try a different disc - eject and restart
+                    echo
+                    eject_disc
+                    echo
+                    echo "Please insert a different disc"
+                    read -p "Press Enter when ready..."
+                    echo
+                    echo "========================================"
+                    echo
+
+                    # Get movie title for new disc
+                    read -p "Enter movie title to search: " search_query
+
+                    if [ -z "$search_query" ]; then
+                        log_error "No title entered"
+                        cleanup
+                        exit 1
+                    fi
+
+                    # Search TMDb and get metadata
+                    if ! search_tmdb "$search_query"; then
+                        log_error "Failed to get movie metadata"
+                        cleanup
+                        exit 1
+                    fi
+
+                    # Create filename base (using original title)
+                    local safe_title=$(sanitize_filename "$MOVIE_TITLE_ORIGINAL")
+                    FILENAME_BASE="${safe_title} (${MOVIE_YEAR}) {${IMDB_ID}}"
+
+                    echo
+                    log_info "Final filename will be: ${FILENAME_BASE}.mkv"
+                    echo
+
+                    # Select encoding preset for this disc
+                    echo "Select encoding preset for this disc:"
+                    echo "1. DVD to x264 MKV (SD/DVD content - CRF 20, veryslow, ~60-90min)"
+                    echo "   - x264 veryslow, film tune, quality 20, multi-pass"
+                    echo "   - AC3 audio passthrough, subtitle scan (not burned)"
+                    echo
+                    echo "2. BluRay to x264 MKV (1080p content - CRF 24, veryslow, ~90-120min)"
+                    echo "   - x264 veryslow, film tune, quality 24, multi-pass"
+                    echo "   - AC3 audio encode, subtitle scan (not burned)"
+                    echo
+                    echo "3. BluRay 4K to x265 (4K UHD content - CRF 24, slow, ~120-180min)"
+                    echo "   - x265 10-bit slow, quality 24, multi-pass"
+                    echo "   - AC3 audio passthrough, subtitle scan (not burned)"
+                    echo
+
+                    local preset_choice=""
+                    while [[ ! "$preset_choice" =~ ^[1-3]$ ]]; do
+                        read -p "Enter preset number (1-3, required): " preset_choice
+                        if [[ ! "$preset_choice" =~ ^[1-3]$ ]]; then
+                            log_warn "Invalid selection. Please enter 1, 2, or 3"
+                        fi
+                    done
+
+                    case "$preset_choice" in
+                        1)
+                            SELECTED_PRESET="custom_x264_mkv2"
+                            log_info "Selected preset: DVD to x264 MKV"
+                            ;;
+                        2)
+                            SELECTED_PRESET="bluray_1080p_x264"
+                            log_info "Selected preset: BluRay to x264 MKV"
+                            ;;
+                        3)
+                            SELECTED_PRESET="bluray_4k_x265"
+                            log_info "Selected preset: BluRay 4K to x265"
+                            ;;
+                    esac
+                    echo
+
+                    # Continue loop to scan new disc
+                    continue
+                fi
             fi
 
             # Create backup filename
             local backup_file="$BACKUP_DIR/${IMDB_ID}_raw.mkv"
 
-            # Backup disc (uses MakeMKV)
-            if ! backup_dvd "$backup_file"; then
-                log_error "Disc backup failed"
-                cleanup
-                exit 1
+            # Backup disc (uses MakeMKV) with retry logic
+            local backup_success=false
+            local backup_attempts=0
+            local max_backup_attempts=2
+
+            while [ "$backup_success" = false ] && [ "$backup_attempts" -lt "$max_backup_attempts" ]; do
+                ((backup_attempts++)) || true
+
+                if [ "$backup_attempts" -gt 1 ]; then
+                    log_info "Backup attempt $backup_attempts of $max_backup_attempts..."
+                fi
+
+                if backup_dvd "$backup_file"; then
+                    backup_success=true
+                    break
+                else
+                    log_error "Disc backup failed (attempt $backup_attempts/$max_backup_attempts)"
+
+                    if [ "$backup_attempts" -lt "$max_backup_attempts" ]; then
+                        echo
+                        log_info "Backup failed. This could be due to:"
+                        log_info "  - Read errors on the disc"
+                        log_info "  - Timeout issues"
+                        log_info "  - Insufficient disk space"
+                        echo
+
+                        read -p "Try backup again? (y/n): " retry_backup
+                        if [ "$retry_backup" != "y" ]; then
+                            break
+                        fi
+
+                        log_info "Waiting 3 seconds before retry..."
+                        sleep 3
+                    fi
+                fi
+            done
+
+            # If backup failed after all retries, offer options
+            if [ "$backup_success" = false ]; then
+                echo
+                log_error "Unable to backup disc after $backup_attempts attempt(s)"
+                echo
+                echo "What would you like to do?"
+                echo "1. Try a different disc"
+                echo "2. Exit and keep current queue"
+                echo "0. Exit and cleanup"
+                echo
+
+                local failure_action=0
+                while true; do
+                    read -p "Enter choice (0-2): " failure_action
+
+                    if [[ "$failure_action" =~ ^[0-2]$ ]]; then
+                        break
+                    else
+                        log_warn "Invalid selection. Please enter 0, 1, or 2."
+                    fi
+                done
+
+                if [ "$failure_action" -eq 0 ]; then
+                    log_info "Exiting with cleanup"
+                    cleanup
+                    exit 1
+                elif [ "$failure_action" -eq 2 ]; then
+                    log_info "Exiting. Backups preserved in: $BACKUP_DIR"
+                    if [ -f "$QUEUE_FILE" ]; then
+                        log_info "Queue file: $QUEUE_FILE"
+                    fi
+                    cleanup
+                    exit 0
+                else
+                    # Try a different disc - eject and restart
+                    echo
+                    eject_disc
+                    echo
+                    echo "Please insert a different disc"
+                    read -p "Press Enter when ready..."
+                    echo
+                    echo "========================================"
+                    echo
+
+                    # Get movie title for new disc
+                    read -p "Enter movie title to search: " search_query
+
+                    if [ -z "$search_query" ]; then
+                        log_error "No title entered"
+                        cleanup
+                        exit 1
+                    fi
+
+                    # Search TMDb and get metadata
+                    if ! search_tmdb "$search_query"; then
+                        log_error "Failed to get movie metadata"
+                        cleanup
+                        exit 1
+                    fi
+
+                    # Create filename base (using original title)
+                    local safe_title=$(sanitize_filename "$MOVIE_TITLE_ORIGINAL")
+                    FILENAME_BASE="${safe_title} (${MOVIE_YEAR}) {${IMDB_ID}}"
+
+                    echo
+                    log_info "Final filename will be: ${FILENAME_BASE}.mkv"
+                    echo
+
+                    # Select encoding preset for this disc
+                    echo "Select encoding preset for this disc:"
+                    echo "1. DVD to x264 MKV (SD/DVD content - CRF 20, veryslow, ~60-90min)"
+                    echo "   - x264 veryslow, film tune, quality 20, multi-pass"
+                    echo "   - AC3 audio passthrough, subtitle scan (not burned)"
+                    echo
+                    echo "2. BluRay to x264 MKV (1080p content - CRF 24, veryslow, ~90-120min)"
+                    echo "   - x264 veryslow, film tune, quality 24, multi-pass"
+                    echo "   - AC3 audio encode, subtitle scan (not burned)"
+                    echo
+                    echo "3. BluRay 4K to x265 (4K UHD content - CRF 24, slow, ~120-180min)"
+                    echo "   - x265 10-bit slow, quality 24, multi-pass"
+                    echo "   - AC3 audio passthrough, subtitle scan (not burned)"
+                    echo
+
+                    local preset_choice=""
+                    while [[ ! "$preset_choice" =~ ^[1-3]$ ]]; do
+                        read -p "Enter preset number (1-3, required): " preset_choice
+                        if [[ ! "$preset_choice" =~ ^[1-3]$ ]]; then
+                            log_warn "Invalid selection. Please enter 1, 2, or 3"
+                        fi
+                    done
+
+                    case "$preset_choice" in
+                        1)
+                            SELECTED_PRESET="custom_x264_mkv2"
+                            log_info "Selected preset: DVD to x264 MKV"
+                            ;;
+                        2)
+                            SELECTED_PRESET="bluray_1080p_x264"
+                            log_info "Selected preset: BluRay to x264 MKV"
+                            ;;
+                        3)
+                            SELECTED_PRESET="bluray_4k_x265"
+                            log_info "Selected preset: BluRay 4K to x265"
+                            ;;
+                    esac
+                    echo
+
+                    # Continue loop to try new disc
+                    continue
+                fi
             fi
 
             log_info "Backup file size: $(du -h "$backup_file" | cut -f1)"
@@ -1877,6 +2214,10 @@ main() {
             echo
             log_info "=== Disc Backup Complete ==="
             log_info "Backup saved: $(basename "$backup_file")"
+            echo
+
+            # Eject disc immediately after successful backup
+            eject_disc
             echo
 
             # Show sub-menu
@@ -1901,15 +2242,14 @@ main() {
                 log_info "Exiting. Backups preserved in: $BACKUP_DIR"
                 log_info "Queue file: $QUEUE_FILE"
                 cleanup
+                show_elapsed_time "$START_TIME"
                 exit 0
             elif [ "$next_action" -eq 2 ]; then
                 # Process transcode queue
                 mode=2
                 break
             else
-                # Backup another disc - eject current disc
-                echo
-                eject_disc
+                # Backup another disc - disc was already ejected after backup
                 echo
                 echo "Please insert the next disc"
                 read -p "Press Enter when ready..."
@@ -2001,6 +2341,7 @@ main() {
 
         echo
         log_info "=== All Processing Complete ==="
+        show_elapsed_time "$START_TIME"
         exit 0
     fi
 }
