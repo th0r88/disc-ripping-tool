@@ -272,7 +272,10 @@ eject_disc() {
 cleanup() {
     if [ "$KEEP_TEMP" = true ]; then
         log_info "Preserving temporary files for debugging in: $TEMP_DIR"
-        log_info "Output files preserved in: $OUTPUT_DIR"
+        # Only show output directory message if files are actually there
+        if [ -d "$OUTPUT_DIR" ] && [ "$(ls -A "$OUTPUT_DIR" 2>/dev/null)" ]; then
+            log_info "Final encoded files available in: $OUTPUT_DIR"
+        fi
         log_warn "Remember to manually clean temp directory when done: rm -rf $TEMP_DIR/*"
     else
         log_info "Cleaning up temporary files..."
@@ -281,7 +284,10 @@ cleanup() {
             find "$TEMP_DIR" -maxdepth 1 -type f ! -name "transcode_queue.txt" ! -name "transcode_completed.log" ! -name "current_operation.state" -delete
             # Don't remove backups directory
         fi
-        log_info "Output files preserved in: $OUTPUT_DIR"
+        # Only show output directory message if files are actually there
+        if [ -d "$OUTPUT_DIR" ] && [ "$(ls -A "$OUTPUT_DIR" 2>/dev/null)" ]; then
+            log_info "Files remaining in output directory: $OUTPUT_DIR"
+        fi
         if [ -f "$QUEUE_FILE" ]; then
             log_info "Queue file preserved: $QUEUE_FILE"
         fi
